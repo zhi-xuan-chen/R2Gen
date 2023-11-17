@@ -190,7 +190,13 @@ class Trainer(BaseTrainer):
         self.test_dataloader = test_dataloader
 
     def _train_epoch(self, epoch):
+        # 获取可见的GPU数量
+        num_gpus = torch.cuda.device_count()
 
+        # 打印每个GPU设备的名称
+        for i in range(num_gpus):
+            gpu_name = torch.cuda.get_device_name(i)
+            print(f"GPU {i}: {gpu_name}")
         train_loss = 0
         self.model.train()
         for batch_idx, (images_id, images, reports_ids, reports_masks) in enumerate(self.train_dataloader):

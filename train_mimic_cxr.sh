@@ -1,10 +1,11 @@
-python main_train.py \
---image_dir data/mimic_cxr/images/ \
---ann_path data/mimic_cxr/annotation.json \
+CUDA_VISIBLE_DEVICES=1,2 python main_train.py \
+--image_dir /jhcnas1/chenzhixuan/mimic-cxr-jpg/images_resized \
+--ann_path /jhcnas1/chenzhixuan/mimic-cxr-jpg/annotation.json \
 --dataset_name mimic_cxr \
 --max_seq_length 100 \
 --threshold 10 \
---batch_size 16 \
+--n_gpu 1 \
+--batch_size 32 \
 --epochs 30 \
 --save_dir results/mimic_cxr \
 --step_size 1 \
