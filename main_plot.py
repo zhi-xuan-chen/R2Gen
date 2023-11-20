@@ -21,7 +21,7 @@ def parse_agrs():
     parser.add_argument('--max_seq_length', type=int, default=60, help='the maximum sequence length of the reports.')
     parser.add_argument('--threshold', type=int, default=3, help='the cut off frequency for the words.')
     parser.add_argument('--num_workers', type=int, default=2, help='the number of workers for dataloader.')
-    parser.add_argument('--batch_size', type=int, default=16, help='the number of samples for a batch')
+    parser.add_argument('--batch_size', type=int, default=1, help='the number of samples for a batch')
 
     # Model settings (for visual extractor)
     parser.add_argument('--visual_extractor', type=str, default='resnet101', help='the visual extractor to be used.')
@@ -47,7 +47,7 @@ def parse_agrs():
 
     # Sample related
     parser.add_argument('--sample_method', type=str, default='beam_search', help='the sample methods to sample a report.')
-    parser.add_argument('--beam_size', type=int, default=3, help='the beam size when beam searching.')
+    parser.add_argument('--beam_size', type=int, default=1, help='the beam size when beam searching.')
     parser.add_argument('--temperature', type=float, default=1.0, help='the temperature when sampling.')
     parser.add_argument('--sample_n', type=int, default=1, help='the sample number per image.')
     parser.add_argument('--group_size', type=int, default=1, help='the group size.')
@@ -80,7 +80,7 @@ def parse_agrs():
     # Others
     parser.add_argument('--seed', type=int, default=9233, help='.')
     parser.add_argument('--resume', type=str, help='whether to resume the training from existing checkpoints.')
-    parser.add_argument('--load', type=str, help='whether to load a pre-trained model.')
+    parser.add_argument('--load', type=str, default='/home/chenzhixuan/Workspace/R2Gen/results/iu_xray/model_best.pth', help='whether to load a pre-trained model.')
 
     args = parser.parse_args()
     return args

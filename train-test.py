@@ -57,8 +57,8 @@ def occupy_gpu_memory(device, memory_size, mode='compute'):
         print("发生错误:", e)
 
 # 指定要占用显存的显卡索引和显存大小（以MB为单位）
-gpu_index = 0  # 在第一个显卡上占用显存
-memory_size = 8000  # 占用16000MB的显存
+gpu_index = 3 # 在第一个显卡上占用显存
+memory_size = 24000  # 占用16000MB的显存
 mode = 'compute'  # 计算模式
 
 # 启动占用显存的程序

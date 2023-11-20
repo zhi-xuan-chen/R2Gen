@@ -1,6 +1,6 @@
 python main_test.py \
---image_dir data/mimic_cxr/images/ \
---ann_path data/mimic_cxr/annotation.json \
+--image_dir /jhcnas1/chenzhixuan/mimic-cxr-jpg/images_resized/ \
+--ann_path /jhcnas1/chenzhixuan/mimic-cxr-jpg/annotation.json \
 --dataset_name mimic_cxr \
 --max_seq_length 100 \
 --threshold 10 \
@@ -10,5 +10,5 @@ python main_test.py \
 --step_size 1 \
 --gamma 0.8 \
 --seed 42 \
---load data/model_mimic_cxr.pth \
+--load /home/chenzhixuan/Workspace/R2Gen/results/mimic_cxr/model_best.pth \
 --beam_size 2

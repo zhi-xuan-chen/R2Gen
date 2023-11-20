@@ -10,4 +10,4 @@ python main_test.py \
 --step_size 50 \
 --gamma 0.1 \
 --seed 9223 \
---load data/model_iu_xray.pth
+--load /home/chenzhixuan/Workspace/R2Gen/results/iu_xray/model_best.pth

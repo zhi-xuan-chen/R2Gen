@@ -68,7 +68,8 @@ class BaseTrainer(object):
                 try:
                     # check whether model performance improved or not, according to specified metric(mnt_metric)
                     improved = (self.mnt_mode == 'min' and log[self.mnt_metric] <= self.mnt_best) or \
-                               (self.mnt_mode == 'max' and log[self.mnt_metric] >= self.mnt_best)
+                               (self.mnt_mode ==
+                                'max' and log[self.mnt_metric] >= self.mnt_best)
                 except KeyError:
                     print("Warning: Metric '{}' is not found. " "Model performance monitoring is disabled.".format(
                         self.mnt_metric))
@@ -104,7 +105,8 @@ class BaseTrainer(object):
 
         if not os.path.exists(self.args.record_dir):
             os.makedirs(self.args.record_dir)
-        record_path = os.path.join(self.args.record_dir, self.args.dataset_name+'.csv')
+        record_path = os.path.join(
+            self.args.record_dir, self.args.dataset_name+'.csv')
         if not os.path.exists(record_path):
             record_table = pd.DataFrame()
         else:
@@ -119,7 +121,8 @@ class BaseTrainer(object):
     def _prepare_device(self, n_gpu_use):
         n_gpu = torch.cuda.device_count()
         if n_gpu_use > 0 and n_gpu == 0:
-            print("Warning: There\'s no GPU available on this machine," "training will be performed on CPU.")
+            print(
+                "Warning: There\'s no GPU available on this machine," "training will be performed on CPU.")
             n_gpu_use = 0
         if n_gpu_use > n_gpu:
             print(
@@ -154,28 +157,32 @@ class BaseTrainer(object):
         self.model.load_state_dict(checkpoint['state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer'])
 
-        print("Checkpoint loaded. Resume training from epoch {}".format(self.start_epoch))
+        print("Checkpoint loaded. Resume training from epoch {}".format(
+            self.start_epoch))
 
     def _record_best(self, log):
         improved_val = (self.mnt_mode == 'min' and log[self.mnt_metric] <= self.best_recorder['val'][
             self.mnt_metric]) or \
-                       (self.mnt_mode == 'max' and log[self.mnt_metric] >= self.best_recorder['val'][self.mnt_metric])
+            (self.mnt_mode == 'max' and log[self.mnt_metric]
+             >= self.best_recorder['val'][self.mnt_metric])
         if improved_val:
             self.best_recorder['val'].update(log)
 
         improved_test = (self.mnt_mode == 'min' and log[self.mnt_metric_test] <= self.best_recorder['test'][
             self.mnt_metric_test]) or \
-                        (self.mnt_mode == 'max' and log[self.mnt_metric_test] >= self.best_recorder['test'][
-                            self.mnt_metric_test])
+            (self.mnt_mode == 'max' and log[self.mnt_metric_test] >= self.best_recorder['test'][
+                self.mnt_metric_test])
         if improved_test:
             self.best_recorder['test'].update(log)
 
     def _print_best(self):
-        print('Best results (w.r.t {}) in validation set:'.format(self.args.monitor_metric))
+        print('Best results (w.r.t {}) in validation set:'.format(
+            self.args.monitor_metric))
         for key, value in self.best_recorder['val'].items():
             print('\t{:15s}: {}'.format(str(key), value))
 
-        print('Best results (w.r.t {}) in test set:'.format(self.args.monitor_metric))
+        print('Best results (w.r.t {}) in test set:'.format(
+            self.args.monitor_metric))
         for key, value in self.best_recorder['test'].items():
             print('\t{:15s}: {}'.format(str(key), value))
 
@@ -183,7 +190,8 @@ class BaseTrainer(object):
 class Trainer(BaseTrainer):
     def __init__(self, model, criterion, metric_ftns, optimizer, args, lr_scheduler, train_dataloader, val_dataloader,
                  test_dataloader):
-        super(Trainer, self).__init__(model, criterion, metric_ftns, optimizer, args)
+        super(Trainer, self).__init__(
+            model, criterion, metric_ftns, optimizer, args)
         self.lr_scheduler = lr_scheduler
         self.train_dataloader = train_dataloader
         self.val_dataloader = val_dataloader
@@ -218,8 +226,10 @@ class Trainer(BaseTrainer):
                 images, reports_ids, reports_masks = images.to(self.device), reports_ids.to(
                     self.device), reports_masks.to(self.device)
                 output = self.model(images, mode='sample')
-                reports = self.model.tokenizer.decode_batch(output.cpu().numpy())
-                ground_truths = self.model.tokenizer.decode_batch(reports_ids[:, 1:].cpu().numpy())
+                reports = self.model.tokenizer.decode_batch(
+                    output.cpu().numpy())
+                ground_truths = self.model.tokenizer.decode_batch(
+                    reports_ids[:, 1:].cpu().numpy())
                 val_res.extend(reports)
                 val_gts.extend(ground_truths)
             val_met = self.metric_ftns({i: [gt] for i, gt in enumerate(val_gts)},
@@ -233,8 +243,10 @@ class Trainer(BaseTrainer):
                 images, reports_ids, reports_masks = images.to(self.device), reports_ids.to(
                     self.device), reports_masks.to(self.device)
                 output = self.model(images, mode='sample')
-                reports = self.model.tokenizer.decode_batch(output.cpu().numpy())
-                ground_truths = self.model.tokenizer.decode_batch(reports_ids[:, 1:].cpu().numpy())
+                reports = self.model.tokenizer.decode_batch(
+                    output.cpu().numpy())
+                ground_truths = self.model.tokenizer.decode_batch(
+                    reports_ids[:, 1:].cpu().numpy())
                 test_res.extend(reports)
                 test_gts.extend(ground_truths)
             test_met = self.metric_ftns({i: [gt] for i, gt in enumerate(test_gts)},
