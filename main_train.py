@@ -8,21 +8,24 @@ from modules.optimizers import build_optimizer, build_lr_scheduler
 from modules.trainer import Trainer
 from modules.loss import compute_loss
 from models.r2gen import R2GenModel
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 
 def parse_agrs():
     parser = argparse.ArgumentParser()
 
     # Data input settings
-    parser.add_argument('--image_dir', type=str, default='data/iu_xray/images/', help='the path to the directory containing the data.')
-    parser.add_argument('--ann_path', type=str, default='data/iu_xray/annotation.json', help='the path to the directory containing the data.')
+    parser.add_argument('--image_dir', type=str, default='/jhcnas1/chenzhixuan/CTRG/Chest_new_1', help='the path to the directory containing the data.')
+    parser.add_argument('--ann_path', type=str, default='/jhcnas1/chenzhixuan/CTRG/Chest_new_1/annotation.json', help='the path to the directory containing the data.')
 
     # Data loader settings
-    parser.add_argument('--dataset_name', type=str, default='iu_xray', choices=['iu_xray', 'mimic_cxr'], help='the dataset to be used.')
-    parser.add_argument('--max_seq_length', type=int, default=60, help='the maximum sequence length of the reports.')
-    parser.add_argument('--threshold', type=int, default=3, help='the cut off frequency for the words.')
+    parser.add_argument('--dataset_name', type=str, default='CTRG', choices=['iu_xray', 'mimic_cxr', 'CTRG'], help='the dataset to be used.')
+    parser.add_argument('--max_seq_length', type=int, default=150, help='the maximum sequence length of the reports.')
+    parser.add_argument('--threshold', type=int, default=5, help='the cut off frequency for the words.')
     parser.add_argument('--num_workers', type=int, default=2, help='the number of workers for dataloader.')
-    parser.add_argument('--batch_size', type=int, default=16, help='the number of samples for a batch')
+    parser.add_argument('--batch_size', type=int, default=2, help='the number of samples for a batch')
+    parser.add_argument('--num_slices', type=int, default=2, help='the number of selected slices per image.')
 
     # Model settings (for visual extractor)
     parser.add_argument('--visual_extractor', type=str, default='resnet101', help='the visual extractor to be used.')

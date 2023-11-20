@@ -15,8 +15,10 @@ class R2GenModel(nn.Module):
         self.encoder_decoder = EncoderDecoder(args, tokenizer)
         if args.dataset_name == 'iu_xray':
             self.forward = self.forward_iu_xray
-        else:
+        elif args.dataset_name == 'mimic_cxr':
             self.forward = self.forward_mimic_cxr
+        elif args.dataset_name == 'CTRG':
+            self.forward = self.forward_CTRG
 
     def __str__(self):
         model_parameters = filter(lambda p: p.requires_grad, self.parameters())
@@ -38,6 +40,26 @@ class R2GenModel(nn.Module):
 
     def forward_mimic_cxr(self, images, targets=None, mode='train'):
         att_feats, fc_feats = self.visual_extractor(images)
+        if mode == 'train':
+            output = self.encoder_decoder(fc_feats, att_feats, targets, mode='forward')
+        elif mode == 'sample':
+            output, _ = self.encoder_decoder(fc_feats, att_feats, mode='sample')
+        else:
+            raise ValueError
+        return output
+
+    def forward_CTRG(self, images, targets=None, mode='train'):
+        att_feats = []
+        fc_feats = []
+
+        for i in range(images.size(1)):
+            att_feat, fc_feat = self.visual_extractor(images[:, i])
+            att_feats.append(att_feat)
+            fc_feats.append(fc_feat)
+
+        att_feats = torch.cat(att_feats, dim=1)
+        fc_feats = torch.cat(fc_feats, dim=1)
+        
         if mode == 'train':
             output = self.encoder_decoder(fc_feats, att_feats, targets, mode='forward')
         elif mode == 'sample':

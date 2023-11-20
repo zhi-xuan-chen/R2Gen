@@ -10,8 +10,10 @@ class Tokenizer(object):
         self.dataset_name = args.dataset_name
         if self.dataset_name == 'iu_xray':
             self.clean_report = self.clean_report_iu_xray
-        else:
+        elif self.dataset_name == 'mimic_cxr':
             self.clean_report = self.clean_report_mimic_cxr
+        elif self.dataset_name == 'CTRG':
+            self.clean_report = self.clean_report_CTRG
         self.ann = json.loads(open(self.ann_path, 'r').read())
         self.token2idx, self.idx2token = self.create_vocabulary()
 
@@ -54,6 +56,15 @@ class Tokenizer(object):
             .strip().lower().split('. ')
         sent_cleaner = lambda t: re.sub('[.,?;*!%^&_+():-\[\]{}]', '', t.replace('"', '').replace('/', '')
                                         .replace('\\', '').replace("'", '').strip().lower())
+        tokens = [sent_cleaner(sent) for sent in report_cleaner(report) if sent_cleaner(sent) != []]
+        report = ' . '.join(tokens) + ' .'
+        return report
+    
+    def clean_report_CTRG(self, report):
+        report_cleaner = lambda t: t.replace('..', '.').replace('..', '.').replace('..', '.') \
+            .strip().lower().split('. ')
+        sent_cleaner = lambda t: re.sub('[.,?;*!%^&_+():-\[\]{}]', '', t.replace('"', '').replace('/', '').
+                                        replace('\\', '').replace("'", '').strip().lower())
         tokens = [sent_cleaner(sent) for sent in report_cleaner(report) if sent_cleaner(sent) != []]
         report = ' . '.join(tokens) + ' .'
         return report

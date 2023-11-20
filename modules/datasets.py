@@ -10,6 +10,7 @@ class BaseDataset(Dataset):
         self.image_dir = args.image_dir
         self.ann_path = args.ann_path
         self.max_seq_length = args.max_seq_length
+        self.num_slices = args.num_slices
         self.split = split
         self.tokenizer = tokenizer
         self.transform = transform
@@ -53,5 +54,39 @@ class MimiccxrSingleImageDataset(BaseDataset):
         report_ids = example['ids']
         report_masks = example['mask']
         seq_length = len(report_ids)
+        sample = (image_id, image, report_ids, report_masks, seq_length)
+        return sample
+
+class CTRG_MultiImageDataset(BaseDataset):
+    def __getitem__(self, idx):
+        example = self.examples[idx]
+        image_id = example['id']
+        image_paths = example['image_path']
+
+        #select 20 images from image_paths
+        num_slices = self.num_slices
+        step = len(image_paths) // num_slices
+
+        if len(image_paths) > num_slices:
+            image_paths = [image_paths[i] for i in range(0, len(image_paths), step)]
+            image_paths = image_paths[:num_slices]
+        else:
+            image_paths = image_paths + [image_paths[-1]] * (num_slices - len(image_paths))
+
+        assert len(image_paths) == num_slices
+
+        images = []
+        for image_path in image_paths:
+            image = Image.open(os.path.join(self.image_dir, image_path)).convert('RGB')
+            if self.transform is not None:
+                image = self.transform(image)
+            images.append(image)
+
+        image = torch.stack(images, 0)
+
+        report_ids = example['ids']
+        report_masks = example['mask']
+        seq_length = len(report_ids)
+
         sample = (image_id, image, report_ids, report_masks, seq_length)
         return sample
