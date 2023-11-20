@@ -147,3 +147,6 @@ data/mimic_cxr/
 # Results
 results/
 records/
+
+# Scripts
+scripts/
