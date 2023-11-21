@@ -8,8 +8,12 @@ from modules.optimizers import build_optimizer, build_lr_scheduler
 from modules.trainer import Trainer
 from modules.loss import compute_loss
 from models.r2gen import R2GenModel
+from utils.ddp import ddp_setup
+from torch.distributed import destroy_process_group
+import torch.multiprocessing as mp
+import torch.distributed as dist
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1,3"
 
 
 def parse_agrs():
@@ -24,7 +28,7 @@ def parse_agrs():
     parser.add_argument('--max_seq_length', type=int, default=150, help='the maximum sequence length of the reports.')
     parser.add_argument('--threshold', type=int, default=5, help='the cut off frequency for the words.')
     parser.add_argument('--num_workers', type=int, default=2, help='the number of workers for dataloader.')
-    parser.add_argument('--batch_size', type=int, default=2, help='the number of samples for a batch')
+    parser.add_argument('--batch_size', type=int, default=4, help='the number of samples for a batch')
     parser.add_argument('--num_slices', type=int, default=2, help='the number of selected slices per image.')
 
     # Model settings (for visual extractor)
@@ -60,9 +64,9 @@ def parse_agrs():
     parser.add_argument('--block_trigrams', type=int, default=1, help='whether to use block trigrams.')
 
     # Trainer settings
-    parser.add_argument('--n_gpu', type=int, default=1, help='the number of gpus to be used.')
+    parser.add_argument('--n_gpu', type=int, default=2, help='the number of gpus to be used.')
     parser.add_argument('--epochs', type=int, default=100, help='the number of training epochs.')
-    parser.add_argument('--save_dir', type=str, default='results/iu_xray', help='the patch to save the models.')
+    parser.add_argument('--save_dir', type=str, default='results/CTRG/test', help='the patch to save the models.')
     parser.add_argument('--record_dir', type=str, default='records/', help='the patch to save the results of experiments')
     parser.add_argument('--save_period', type=int, default=1, help='the saving period.')
     parser.add_argument('--monitor_mode', type=str, default='max', choices=['min', 'max'], help='whether to max or min the metric.')
@@ -89,9 +93,10 @@ def parse_agrs():
     return args
 
 
-def main():
-    # parse arguments
-    args = parse_agrs()
+def main(rank=0, world_size=1, args=None):
+    if args.n_gpu > 1:
+        # setup distributed training
+        ddp_setup(rank, world_size)
 
     # fix random seeds
     torch.manual_seed(args.seed)
@@ -103,7 +108,10 @@ def main():
     tokenizer = Tokenizer(args)
 
     # create data loader
-    train_dataloader = R2DataLoader(args, tokenizer, split='train', shuffle=True)
+    if args.n_gpu > 1:
+        train_dataloader = R2DataLoader(args, tokenizer, split='train', shuffle=False)
+    else:
+        train_dataloader = R2DataLoader(args, tokenizer, split='train', shuffle=True)
     val_dataloader = R2DataLoader(args, tokenizer, split='val', shuffle=False)
     test_dataloader = R2DataLoader(args, tokenizer, split='test', shuffle=False)
 
@@ -119,9 +127,18 @@ def main():
     lr_scheduler = build_lr_scheduler(args, optimizer)
 
     # build trainer and start to train
-    trainer = Trainer(model, criterion, metrics, optimizer, args, lr_scheduler, train_dataloader, val_dataloader, test_dataloader)
+    trainer = Trainer(model, criterion, metrics, rank, optimizer, args, lr_scheduler, train_dataloader, val_dataloader, test_dataloader)
     trainer.train()
+
+    if args.n_gpu > 1:
+        destroy_process_group()
 
 
 if __name__ == '__main__':
-    main()
+    # parse arguments
+    args = parse_agrs()
+
+    if args.n_gpu == 1:
+        main(rank=0, args=args)
+    else:
+        mp.spawn(main, nprocs=args.n_gpu, args=(args.n_gpu, args))

@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from torchvision import transforms
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 from .datasets import IuxrayMultiImageDataset, MimiccxrSingleImageDataset, CTRG_MultiImageDataset
 
 
@@ -36,12 +37,17 @@ class R2DataLoader(DataLoader):
             self.dataset = MimiccxrSingleImageDataset(self.args, self.tokenizer, self.split, transform=self.transform)
         elif self.dataset_name == 'CTRG':
             self.dataset = CTRG_MultiImageDataset(self.args, self.tokenizer, self.split, transform=self.transform)
-        
+
+        if self.args.n_gpu > 1 and split=='train':
+            self.sampler = DistributedSampler(self.dataset)
+        else:
+            self.sampler = None
 
         self.init_kwargs = {
             'dataset': self.dataset,
             'batch_size': self.batch_size,
             'shuffle': self.shuffle,
+            'sampler': self.sampler,    
             'collate_fn': self.collate_fn,
             'num_workers': self.num_workers
         }

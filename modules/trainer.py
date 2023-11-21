@@ -5,17 +5,20 @@ import time
 import torch
 import pandas as pd
 from numpy import inf
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 
 class BaseTrainer(object):
-    def __init__(self, model, criterion, metric_ftns, optimizer, args):
+    def __init__(self, model, criterion, metric_ftns, gpu_id, optimizer, args):
         self.args = args
-
-        # setup GPU device if available, move model into configured device
-        self.device, device_ids = self._prepare_device(args.n_gpu)
-        self.model = model.to(self.device)
-        if len(device_ids) > 1:
-            self.model = torch.nn.DataParallel(model, device_ids=device_ids)
+        self.gpu_id = gpu_id
+        self.model = model.to(gpu_id)
+            
+        if args.n_gpu > 1:
+            self.DDP_flag = True
+            self.model = DDP(self.model, device_ids=[gpu_id])
+        else:
+            self.DDP_flag = False
 
         self.criterion = criterion
         self.metric_ftns = metric_ftns
@@ -56,13 +59,16 @@ class BaseTrainer(object):
             # save logged informations into log dict
             log = {'epoch': epoch}
             log.update(result)
-            self._record_best(log)
+            self._record_best(log) # judge whether the model performance in val set improved or not, and update the best_recorder
 
             # print logged informations to the screen
             for key, value in log.items():
                 print('\t{:15s}: {}'.format(str(key), value))
 
             # evaluate model performance according to configured metric, save best checkpoint as model_best
+            # NOTE: the difference with the self._record_best() is that the self._record_best() will update the best_recorder 
+            # according to the performance in val set, 
+            # while the self._save_checkpoint() will save the best model according to the performance in test set
             best = False
             if self.mnt_mode != 'off':
                 try:
@@ -88,8 +94,8 @@ class BaseTrainer(object):
                         self.early_stop))
                     break
 
-            if epoch % self.save_period == 0:
-                self._save_checkpoint(epoch, save_best=best)
+            if self.gpu_id==0 and epoch % self.save_period == 0:
+                self._save_checkpoint(epoch, save_best=best, DDP=self.DDP_flag)
 
         self._print_best()
         self._print_best_to_file()
@@ -106,7 +112,7 @@ class BaseTrainer(object):
         if not os.path.exists(self.args.record_dir):
             os.makedirs(self.args.record_dir)
         record_path = os.path.join(
-            self.args.record_dir, self.args.dataset_name+'.csv')
+            self.args.record_dir, f"{self.args.dataset_name}_{str(self.args.num_slices)}.csv")
         if not os.path.exists(record_path):
             record_table = pd.DataFrame()
         else:
@@ -129,12 +135,21 @@ class BaseTrainer(object):
                 "Warning: The number of GPU\'s configured to use is {}, but only {} are available " "on this machine.".format(
                     n_gpu_use, n_gpu))
             n_gpu_use = n_gpu
-        device = torch.device('cuda:0' if n_gpu_use > 0 else 'cpu')
+        device = torch.device('cuda' if n_gpu_use > 0 else 'cpu')
         list_ids = list(range(n_gpu_use))
         return device, list_ids
 
-    def _save_checkpoint(self, epoch, save_best=False):
-        state = {
+    def _save_checkpoint(self, epoch, save_best=False, DDP=True):
+        
+        if DDP:
+            state = {
+            'epoch': epoch,
+            'state_dict': self.model.module.state_dict(),
+            'optimizer': self.optimizer.state_dict(),
+            'monitor_best': self.mnt_best
+        }
+        else:
+            state = {
             'epoch': epoch,
             'state_dict': self.model.state_dict(),
             'optimizer': self.optimizer.state_dict(),
@@ -164,14 +179,14 @@ class BaseTrainer(object):
         improved_val = (self.mnt_mode == 'min' and log[self.mnt_metric] <= self.best_recorder['val'][
             self.mnt_metric]) or \
             (self.mnt_mode == 'max' and log[self.mnt_metric]
-             >= self.best_recorder['val'][self.mnt_metric])
+             >= self.best_recorder['val'][self.mnt_metric]) # judge whether the model performance in val set improved or not
         if improved_val:
             self.best_recorder['val'].update(log)
 
         improved_test = (self.mnt_mode == 'min' and log[self.mnt_metric_test] <= self.best_recorder['test'][
             self.mnt_metric_test]) or \
             (self.mnt_mode == 'max' and log[self.mnt_metric_test] >= self.best_recorder['test'][
-                self.mnt_metric_test])
+                self.mnt_metric_test]) # judge whether the model performance in test set improved or not
         if improved_test:
             self.best_recorder['test'].update(log)
 
@@ -188,10 +203,10 @@ class BaseTrainer(object):
 
 
 class Trainer(BaseTrainer):
-    def __init__(self, model, criterion, metric_ftns, optimizer, args, lr_scheduler, train_dataloader, val_dataloader,
+    def __init__(self, model, criterion, metric_ftns, gpu_id, optimizer, args, lr_scheduler, train_dataloader, val_dataloader,
                  test_dataloader):
         super(Trainer, self).__init__(
-            model, criterion, metric_ftns, optimizer, args)
+            model, criterion, metric_ftns, gpu_id, optimizer, args)
         self.lr_scheduler = lr_scheduler
         self.train_dataloader = train_dataloader
         self.val_dataloader = val_dataloader
@@ -201,15 +216,18 @@ class Trainer(BaseTrainer):
         # 获取可见的GPU数量
         num_gpus = torch.cuda.device_count()
 
-        # 打印每个GPU设备的名称
-        for i in range(num_gpus):
-            gpu_name = torch.cuda.get_device_name(i)
-            print(f"GPU {i}: {gpu_name}")
+        if self.gpu_id == 0:
+            # 打印每个GPU设备的名称
+            for i in range(num_gpus):
+                gpu_name = torch.cuda.get_device_name(i)
+                print(f"GPU {i}: {gpu_name}")
         train_loss = 0
         self.model.train()
+        if self.DDP_flag:
+            self.train_dataloader.sampler.set_epoch(epoch)
         for batch_idx, (images_id, images, reports_ids, reports_masks) in enumerate(self.train_dataloader):
-            images, reports_ids, reports_masks = images.to(self.device), reports_ids.to(self.device), reports_masks.to(
-                self.device)
+            images, reports_ids, reports_masks = images.to(self.gpu_id), reports_ids.to(self.gpu_id), reports_masks.to(
+                self.gpu_id)
             output = self.model(images, reports_ids, mode='train')
             loss = self.criterion(output, reports_ids, reports_masks)
             train_loss += loss.item()
@@ -223,35 +241,50 @@ class Trainer(BaseTrainer):
         with torch.no_grad():
             val_gts, val_res = [], []
             for batch_idx, (images_id, images, reports_ids, reports_masks) in enumerate(self.val_dataloader):
-                images, reports_ids, reports_masks = images.to(self.device), reports_ids.to(
-                    self.device), reports_masks.to(self.device)
+                images, reports_ids, reports_masks = images.to(self.gpu_id), reports_ids.to(
+                    self.gpu_id), reports_masks.to(self.gpu_id)
                 output = self.model(images, mode='sample')
-                reports = self.model.tokenizer.decode_batch(
-                    output.cpu().numpy())
-                ground_truths = self.model.tokenizer.decode_batch(
-                    reports_ids[:, 1:].cpu().numpy())
+
+                if self.args.n_gpu > 1:
+                    reports = self.model.module.tokenizer.decode_batch(
+                        output.cpu().numpy())
+                    ground_truths = self.model.module.tokenizer.decode_batch(
+                        reports_ids[:, 1:].cpu().numpy())
+                else:
+                    reports = self.model.tokenizer.decode_batch(
+                        output.cpu().numpy())
+                    ground_truths = self.model.tokenizer.decode_batch(
+                        reports_ids[:, 1:].cpu().numpy())
+
                 val_res.extend(reports)
                 val_gts.extend(ground_truths)
-            val_met = self.metric_ftns({i: [gt] for i, gt in enumerate(val_gts)},
+            val_met = self.metric_ftns({i: [gt] for i, gt in enumerate(val_gts)}, # compute metrics in val set
                                        {i: [re] for i, re in enumerate(val_res)})
-            log.update(**{'val_' + k: v for k, v in val_met.items()})
+            log.update(**{'val_' + k: v for k, v in val_met.items()}) # update val log
 
         self.model.eval()
         with torch.no_grad():
             test_gts, test_res = [], []
             for batch_idx, (images_id, images, reports_ids, reports_masks) in enumerate(self.test_dataloader):
-                images, reports_ids, reports_masks = images.to(self.device), reports_ids.to(
-                    self.device), reports_masks.to(self.device)
+                images, reports_ids, reports_masks = images.to(self.gpu_id), reports_ids.to(
+                    self.gpu_id), reports_masks.to(self.gpu_id)
                 output = self.model(images, mode='sample')
-                reports = self.model.tokenizer.decode_batch(
-                    output.cpu().numpy())
-                ground_truths = self.model.tokenizer.decode_batch(
-                    reports_ids[:, 1:].cpu().numpy())
+                if self.args.n_gpu > 1:
+                    reports = self.model.module.tokenizer.decode_batch(
+                        output.cpu().numpy())
+                    ground_truths = self.model.module.tokenizer.decode_batch(
+                        reports_ids[:, 1:].cpu().numpy())
+                else:
+                    reports = self.model.tokenizer.decode_batch(
+                        output.cpu().numpy())
+                    ground_truths = self.model.tokenizer.decode_batch(
+                        reports_ids[:, 1:].cpu().numpy())
+
                 test_res.extend(reports)
                 test_gts.extend(ground_truths)
-            test_met = self.metric_ftns({i: [gt] for i, gt in enumerate(test_gts)},
+            test_met = self.metric_ftns({i: [gt] for i, gt in enumerate(test_gts)}, # compute metrics in test set
                                         {i: [re] for i, re in enumerate(test_res)})
-            log.update(**{'test_' + k: v for k, v in test_met.items()})
+            log.update(**{'test_' + k: v for k, v in test_met.items()}) # update test log
 
         self.lr_scheduler.step()
 
