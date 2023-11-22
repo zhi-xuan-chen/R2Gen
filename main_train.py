@@ -13,7 +13,7 @@ from torch.distributed import destroy_process_group
 import torch.multiprocessing as mp
 import torch.distributed as dist
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "1,3"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "1,2"
 
 
 def parse_agrs():
@@ -88,6 +88,7 @@ def parse_agrs():
     # Others
     parser.add_argument('--seed', type=int, default=9233, help='.')
     parser.add_argument('--resume', type=str, help='whether to resume the training from existing checkpoints.')
+    parser.add_argument('--exp_name', type=str, default='test', help='the name of the experiment.')
 
     args = parser.parse_args()
     return args
@@ -138,7 +139,13 @@ if __name__ == '__main__':
     # parse arguments
     args = parse_agrs()
 
+    # 打印参数
+    print("===== 参数设置 =====")
+    for arg in vars(args):
+        print(f"{arg}: {getattr(args, arg)}")
+    print("===================")
+
     if args.n_gpu == 1:
-        main(rank=0, args=args)
+        main(args=args)
     else:
         mp.spawn(main, nprocs=args.n_gpu, args=(args.n_gpu, args))

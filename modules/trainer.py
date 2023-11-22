@@ -18,8 +18,10 @@ class BaseTrainer(object):
         if args.n_gpu > 1:
             self.DDP_flag = True
             self.model = DDP(self.model, device_ids=[gpu_id])
+            print(f"Training with {args.n_gpu} GPUs in a distributed manner.")
         else:
             self.DDP_flag = False
+            print("Training with single GPU.")
 
         self.criterion = criterion
         self.metric_ftns = metric_ftns
@@ -54,10 +56,12 @@ class BaseTrainer(object):
 
     def train(self):
         not_improved_count = 0
+        early_stop_flag = False
+
         for epoch in range(self.start_epoch, self.epochs + 1):
             result = self._train_epoch(epoch)
             
-            if self.gpu_id==0:
+            if self.gpu_id==0: # NOTE: whatever the training mode is, only the master GPU will do the following operations
                 # save logged informations into log dict
                 log = {'epoch': epoch}
                 log.update(result)
@@ -96,7 +100,8 @@ class BaseTrainer(object):
                             self.early_stop))
                         early_stop_flag = True
                         early_stop_flag = torch.tensor([early_stop_flag]).to(self.gpu_id)
-                        dist.broadcast(early_stop_flag, src=self.gpu_id) # synchronize the early_stop_flag
+                        if args.n_gpu > 1:
+                            dist.broadcast(early_stop_flag, src=self.gpu_id) # synchronize the early_stop_flag only when using multiple GPUs
 
                 if epoch % self.save_period == 0:
                     self._save_checkpoint(epoch, save_best=best, DDP=self.DDP_flag)
@@ -121,7 +126,7 @@ class BaseTrainer(object):
         if not os.path.exists(self.args.record_dir):
             os.makedirs(self.args.record_dir)
         record_path = os.path.join(
-            self.args.record_dir, f"{self.args.dataset_name}_{str(self.args.num_slices)}.csv")
+            self.args.record_dir, f"{self.args.exp_name}.csv")
         if not os.path.exists(record_path):
             record_table = pd.DataFrame()
         else:
