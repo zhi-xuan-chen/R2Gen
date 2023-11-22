@@ -4,6 +4,7 @@ from torchvision import transforms
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from .datasets import IuxrayMultiImageDataset, MimiccxrSingleImageDataset, CTRG_MultiImageDataset
+from utils.ddp import get_ddp_generator
 
 
 class R2DataLoader(DataLoader):
@@ -40,8 +41,10 @@ class R2DataLoader(DataLoader):
 
         if self.args.n_gpu > 1 and split=='train':
             self.sampler = DistributedSampler(self.dataset)
+            self.generator = get_ddp_generator()
         else:
             self.sampler = None
+            self.generator = None
 
         self.init_kwargs = {
             'dataset': self.dataset,
@@ -49,7 +52,8 @@ class R2DataLoader(DataLoader):
             'shuffle': self.shuffle,
             'sampler': self.sampler,    
             'collate_fn': self.collate_fn,
-            'num_workers': self.num_workers
+            'num_workers': self.num_workers,
+            'generator': self.generator,
         }
         super().__init__(**self.init_kwargs)
 

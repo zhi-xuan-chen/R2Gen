@@ -18,7 +18,8 @@ class BaseTrainer(object):
         if args.n_gpu > 1:
             self.DDP_flag = True
             self.model = DDP(self.model, device_ids=[gpu_id])
-            print(f"Training with {args.n_gpu} GPUs in a distributed manner.")
+            if gpu_id == 0:
+                print(f"Training with {args.n_gpu} GPUs in a distributed manner.")
         else:
             self.DDP_flag = False
             print("Training with single GPU.")
@@ -42,7 +43,7 @@ class BaseTrainer(object):
         self.checkpoint_dir = args.save_dir
 
         if not os.path.exists(self.checkpoint_dir):
-            os.makedirs(self.checkpoint_dir)
+            os.makedirs(self.checkpoint_dir, exist_ok=True)
 
         if args.resume is not None:
             self._resume_checkpoint(args.resume)
@@ -251,55 +252,57 @@ class Trainer(BaseTrainer):
             self.optimizer.step()
         log = {'train_loss': train_loss / len(self.train_dataloader)}
 
-        if self.gpu_id == 0: # only the master GPU will do the validation and test
-            self.model.eval()
-            with torch.no_grad():
-                val_gts, val_res = [], []
-                for batch_idx, (images_id, images, reports_ids, reports_masks) in enumerate(self.val_dataloader):
-                    images, reports_ids, reports_masks = images.to(self.gpu_id), reports_ids.to(
-                        self.gpu_id), reports_masks.to(self.gpu_id)
-                    output = self.model(images, mode='sample')
+        # NOTE: all the GPUs will do the validation and test, 
+        # since if not, other gpu will wait for a long time for the master gpu 
+        # to finish the validation and test
+        self.model.eval()
+        with torch.no_grad():
+            val_gts, val_res = [], []
+            for batch_idx, (images_id, images, reports_ids, reports_masks) in enumerate(self.val_dataloader):
+                images, reports_ids, reports_masks = images.to(self.gpu_id), reports_ids.to(
+                    self.gpu_id), reports_masks.to(self.gpu_id)
+                output = self.model(images, mode='sample')
 
-                    if self.args.n_gpu > 1:
-                        reports = self.model.module.tokenizer.decode_batch(
-                            output.cpu().numpy())
-                        ground_truths = self.model.module.tokenizer.decode_batch(
-                            reports_ids[:, 1:].cpu().numpy())
-                    else:
-                        reports = self.model.tokenizer.decode_batch(
-                            output.cpu().numpy())
-                        ground_truths = self.model.tokenizer.decode_batch(
-                            reports_ids[:, 1:].cpu().numpy())
+                if self.args.n_gpu > 1:
+                    reports = self.model.module.tokenizer.decode_batch(
+                        output.cpu().numpy())
+                    ground_truths = self.model.module.tokenizer.decode_batch(
+                        reports_ids[:, 1:].cpu().numpy())
+                else:
+                    reports = self.model.tokenizer.decode_batch(
+                        output.cpu().numpy())
+                    ground_truths = self.model.tokenizer.decode_batch(
+                        reports_ids[:, 1:].cpu().numpy())
 
-                    val_res.extend(reports)
-                    val_gts.extend(ground_truths)
-                val_met = self.metric_ftns({i: [gt] for i, gt in enumerate(val_gts)}, # compute metrics in val set
-                                        {i: [re] for i, re in enumerate(val_res)})
-                log.update(**{'val_' + k: v for k, v in val_met.items()}) # update val log
+                val_res.extend(reports)
+                val_gts.extend(ground_truths)
+            val_met = self.metric_ftns({i: [gt] for i, gt in enumerate(val_gts)}, # compute metrics in val set
+                                    {i: [re] for i, re in enumerate(val_res)})
+            log.update(**{'val_' + k: v for k, v in val_met.items()}) # update val log
 
-            self.model.eval()
-            with torch.no_grad():
-                test_gts, test_res = [], []
-                for batch_idx, (images_id, images, reports_ids, reports_masks) in enumerate(self.test_dataloader):
-                    images, reports_ids, reports_masks = images.to(self.gpu_id), reports_ids.to(
-                        self.gpu_id), reports_masks.to(self.gpu_id)
-                    output = self.model(images, mode='sample')
-                    if self.args.n_gpu > 1:
-                        reports = self.model.module.tokenizer.decode_batch(
-                            output.cpu().numpy())
-                        ground_truths = self.model.module.tokenizer.decode_batch(
-                            reports_ids[:, 1:].cpu().numpy())
-                    else:
-                        reports = self.model.tokenizer.decode_batch(
-                            output.cpu().numpy())
-                        ground_truths = self.model.tokenizer.decode_batch(
-                            reports_ids[:, 1:].cpu().numpy())
+        self.model.eval()
+        with torch.no_grad():
+            test_gts, test_res = [], []
+            for batch_idx, (images_id, images, reports_ids, reports_masks) in enumerate(self.test_dataloader):
+                images, reports_ids, reports_masks = images.to(self.gpu_id), reports_ids.to(
+                    self.gpu_id), reports_masks.to(self.gpu_id)
+                output = self.model(images, mode='sample')
+                if self.args.n_gpu > 1:
+                    reports = self.model.module.tokenizer.decode_batch(
+                        output.cpu().numpy())
+                    ground_truths = self.model.module.tokenizer.decode_batch(
+                        reports_ids[:, 1:].cpu().numpy())
+                else:
+                    reports = self.model.tokenizer.decode_batch(
+                        output.cpu().numpy())
+                    ground_truths = self.model.tokenizer.decode_batch(
+                        reports_ids[:, 1:].cpu().numpy())
 
-                    test_res.extend(reports)
-                    test_gts.extend(ground_truths)
-                test_met = self.metric_ftns({i: [gt] for i, gt in enumerate(test_gts)}, # compute metrics in test set
-                                            {i: [re] for i, re in enumerate(test_res)})
-                log.update(**{'test_' + k: v for k, v in test_met.items()}) # update test log
+                test_res.extend(reports)
+                test_gts.extend(ground_truths)
+            test_met = self.metric_ftns({i: [gt] for i, gt in enumerate(test_gts)}, # compute metrics in test set
+                                        {i: [re] for i, re in enumerate(test_res)})
+            log.update(**{'test_' + k: v for k, v in test_met.items()}) # update test log
 
         self.lr_scheduler.step()
 

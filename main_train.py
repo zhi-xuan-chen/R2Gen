@@ -12,6 +12,7 @@ from utils.ddp import ddp_setup
 from torch.distributed import destroy_process_group
 import torch.multiprocessing as mp
 import torch.distributed as dist
+import wandb
 import os
 # os.environ["CUDA_VISIBLE_DEVICES"] = "1,2"
 
@@ -88,6 +89,7 @@ def parse_agrs():
     # Others
     parser.add_argument('--seed', type=int, default=9233, help='.')
     parser.add_argument('--resume', type=str, help='whether to resume the training from existing checkpoints.')
+    parser.add_argument('--master_port', type=int, default=12354, help='the port to be used for distributed training.')
     parser.add_argument('--exp_name', type=str, default='test', help='the name of the experiment.')
 
     args = parser.parse_args()
@@ -97,7 +99,9 @@ def parse_agrs():
 def main(rank=0, world_size=1, args=None):
     if args.n_gpu > 1:
         # setup distributed training
-        ddp_setup(rank, world_size)
+        ddp_setup(rank, world_size, args.master_port)
+    
+    # wandb.init(project="CTRG", name=args.exp_name)
 
     # fix random seeds
     torch.manual_seed(args.seed)
