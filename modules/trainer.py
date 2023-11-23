@@ -8,7 +8,7 @@ from numpy import inf
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 import wandb
-from utils.wandb import log_image_report_table
+from utils.wandb import image_report_table
 
 
 class BaseTrainer(object):
@@ -72,8 +72,8 @@ class BaseTrainer(object):
                 log = {'epoch': epoch}
                 log.update(result)
                 self._record_best(log) # judge whether the model performance in val set improved or not, and update the best_recorder
-
-                wandb.log(log) # log the training information to wandb
+                
+                wandb.log(log, step = epoch) # log the training information to wandb
 
                 # print logged informations to the screen
                 for key, value in log.items():
@@ -114,6 +114,8 @@ class BaseTrainer(object):
                 if epoch % self.save_period == 0:
                     self._save_checkpoint(epoch, save_best=best, DDP=self.DDP_flag)
             epoch_time = time.time() - start_epoch_time
+            if self.gpu_id==0:
+                wandb.log({"epoch_time": epoch_time}, step = epoch)
             # if one GPU detects the early_stop_flag, then all the GPUs will stop training
             if early_stop_flag:
                 break
@@ -122,7 +124,9 @@ class BaseTrainer(object):
             self._print_best()
             self._print_best_to_file()
         
-        total_time = time.time() - start_train_time   
+        total_time = time.time() - start_train_time  
+        if self.gpu_id==0:
+            print(f"Total training time: {total_time} seconds.")
 
     def _print_best_to_file(self):
         crt_time = time.asctime(time.localtime(time.time()))
@@ -248,6 +252,7 @@ class Trainer(BaseTrainer):
         train_loss = 0
         start_train_time = time.time()
         self.model.train()
+        
         if self.DDP_flag:
             self.train_dataloader.sampler.set_epoch(epoch)
         for batch_idx, (images_id, images, reports_ids, reports_masks) in enumerate(self.train_dataloader):
@@ -261,6 +266,8 @@ class Trainer(BaseTrainer):
             torch.nn.utils.clip_grad_value_(self.model.parameters(), 0.1)
             self.optimizer.step()
         train_time = time.time() - start_train_time
+        if self.gpu_id==0:
+            wandb.log({"epoch_train_time": train_time}, step = epoch)
         log = {'train_loss': train_loss / len(self.train_dataloader)}
 
         # NOTE: all the GPUs will do the validation and test, 
@@ -288,7 +295,8 @@ class Trainer(BaseTrainer):
 
                 # wandb table log
                 if batch_idx == 0 and self.gpu_id == 0:
-                    log_image_report_table(images, reports, ground_truths, "val_report_table")
+                    val_table = image_report_table(images, reports, ground_truths)
+                    wandb.log({"val_report_table": val_table}, step = epoch)
                 
                 val_res.extend(reports)
                 val_gts.extend(ground_truths)
@@ -297,6 +305,8 @@ class Trainer(BaseTrainer):
                                     {i: [re] for i, re in enumerate(val_res)})
             log.update(**{'val_' + k: v for k, v in val_met.items()}) # update val log
         val_time = time.time() - start_val_time
+        if self.gpu_id==0:
+            wandb.log({"epoch_val_time": val_time}, step = epoch)
 
         start_test_time = time.time()
         self.model.eval()
@@ -318,7 +328,8 @@ class Trainer(BaseTrainer):
                         reports_ids[:, 1:].cpu().numpy())
                 # wandb table log
                 if batch_idx == 0 and self.gpu_id == 0:
-                    log_image_report_table(images, reports, ground_truths, "test_report_table")
+                    test_table = image_report_table(images, reports, ground_truths)
+                    wandb.log({"test_report_table": test_table}, step = epoch)
 
                 test_res.extend(reports)
                 test_gts.extend(ground_truths)
@@ -327,6 +338,8 @@ class Trainer(BaseTrainer):
             log.update(**{'test_' + k: v for k, v in test_met.items()}) # update test log
         
         test_time = time.time() - start_test_time
+        if self.gpu_id==0:
+            wandb.log({"epoch_test_time": test_time}, step = epoch)
 
         self.lr_scheduler.step()
 

@@ -51,7 +51,8 @@ class R2GenModel(nn.Module):
     def forward_CTRG(self, images, targets=None, mode='train'):
         att_feats = []
         fc_feats = []
-
+        
+        # TODO: add record the time of each slice forward
         for i in range(images.size(1)):
             att_feat, fc_feat = self.visual_extractor(images[:, i])
             att_feats.append(att_feat)
