@@ -7,6 +7,8 @@ import pandas as pd
 from numpy import inf
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
+import wandb
+from utils.wandb import log_image_report_table
 
 
 class BaseTrainer(object):
@@ -59,7 +61,10 @@ class BaseTrainer(object):
         not_improved_count = 0
         early_stop_flag = False
 
+        start_total_time = time.time()
         for epoch in range(self.start_epoch, self.epochs + 1):
+            start_epoch_time = time.time()
+
             result = self._train_epoch(epoch)
             
             if self.gpu_id==0: # NOTE: whatever the training mode is, only the master GPU will do the following operations
@@ -67,6 +72,8 @@ class BaseTrainer(object):
                 log = {'epoch': epoch}
                 log.update(result)
                 self._record_best(log) # judge whether the model performance in val set improved or not, and update the best_recorder
+
+                wandb.log(log) # log the training information to wandb
 
                 # print logged informations to the screen
                 for key, value in log.items():
@@ -106,7 +113,7 @@ class BaseTrainer(object):
 
                 if epoch % self.save_period == 0:
                     self._save_checkpoint(epoch, save_best=best, DDP=self.DDP_flag)
-            
+            epoch_time = time.time() - start_epoch_time
             # if one GPU detects the early_stop_flag, then all the GPUs will stop training
             if early_stop_flag:
                 break
@@ -114,6 +121,8 @@ class BaseTrainer(object):
         if self.gpu_id==0:
             self._print_best()
             self._print_best_to_file()
+        
+        total_time = time.time() - start_train_time   
 
     def _print_best_to_file(self):
         crt_time = time.asctime(time.localtime(time.time()))
@@ -237,6 +246,7 @@ class Trainer(BaseTrainer):
                 gpu_name = torch.cuda.get_device_name(i)
                 print(f"GPU {i}: {gpu_name}")
         train_loss = 0
+        start_train_time = time.time()
         self.model.train()
         if self.DDP_flag:
             self.train_dataloader.sampler.set_epoch(epoch)
@@ -244,17 +254,19 @@ class Trainer(BaseTrainer):
             images, reports_ids, reports_masks = images.to(self.gpu_id), reports_ids.to(self.gpu_id), reports_masks.to(
                 self.gpu_id)
             output = self.model(images, reports_ids, mode='train')
-            loss = self.criterion(output, reports_ids, reports_masks)
+            loss = self.criterion(output, reports_ids, reports_masks) # NOTE: reports_ids is the ground truth, reports_masks is the padding mask
             train_loss += loss.item()
             self.optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_value_(self.model.parameters(), 0.1)
             self.optimizer.step()
+        train_time = time.time() - start_train_time
         log = {'train_loss': train_loss / len(self.train_dataloader)}
 
         # NOTE: all the GPUs will do the validation and test, 
         # since if not, other gpu will wait for a long time for the master gpu 
         # to finish the validation and test
+        start_val_time = time.time()
         self.model.eval()
         with torch.no_grad():
             val_gts, val_res = [], []
@@ -274,12 +286,19 @@ class Trainer(BaseTrainer):
                     ground_truths = self.model.tokenizer.decode_batch(
                         reports_ids[:, 1:].cpu().numpy())
 
+                # wandb table log
+                if batch_idx == 0 and self.gpu_id == 0:
+                    log_image_report_table(images, reports, ground_truths, "val_report_table")
+                
                 val_res.extend(reports)
                 val_gts.extend(ground_truths)
+                
             val_met = self.metric_ftns({i: [gt] for i, gt in enumerate(val_gts)}, # compute metrics in val set
                                     {i: [re] for i, re in enumerate(val_res)})
             log.update(**{'val_' + k: v for k, v in val_met.items()}) # update val log
+        val_time = time.time() - start_val_time
 
+        start_test_time = time.time()
         self.model.eval()
         with torch.no_grad():
             test_gts, test_res = [], []
@@ -297,12 +316,17 @@ class Trainer(BaseTrainer):
                         output.cpu().numpy())
                     ground_truths = self.model.tokenizer.decode_batch(
                         reports_ids[:, 1:].cpu().numpy())
+                # wandb table log
+                if batch_idx == 0 and self.gpu_id == 0:
+                    log_image_report_table(images, reports, ground_truths, "test_report_table")
 
                 test_res.extend(reports)
                 test_gts.extend(ground_truths)
             test_met = self.metric_ftns({i: [gt] for i, gt in enumerate(test_gts)}, # compute metrics in test set
                                         {i: [re] for i, re in enumerate(test_res)})
             log.update(**{'test_' + k: v for k, v in test_met.items()}) # update test log
+        
+        test_time = time.time() - start_test_time
 
         self.lr_scheduler.step()
 

@@ -148,6 +148,7 @@ data/mimic_cxr/
 results/
 records/
 logs/
+wandb/
 
 # Scripts
 scripts/

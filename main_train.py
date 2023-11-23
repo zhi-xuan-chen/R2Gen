@@ -101,7 +101,19 @@ def main(rank=0, world_size=1, args=None):
         # setup distributed training
         ddp_setup(rank, world_size, args.master_port)
     
-    # wandb.init(project="CTRG", name=args.exp_name)
+    if rank == 0:
+        # init wandb
+        wandb.init(
+            project="CT_Report_generation", 
+            name=args.exp_name,
+            # track hyperparameters and run metadata
+            config={
+                "dataset_name": args.dataset_name,
+                "visual_extractor": args.visual_extractor,
+                "num_slices": args.num_slices,
+                "batch_size": args.batch_size,
+            }
+        )
 
     # fix random seeds
     torch.manual_seed(args.seed)
@@ -134,6 +146,9 @@ def main(rank=0, world_size=1, args=None):
     # build trainer and start to train
     trainer = Trainer(model, criterion, metrics, rank, optimizer, args, lr_scheduler, train_dataloader, val_dataloader, test_dataloader)
     trainer.train()
+
+    if rank == 0:
+        wandb.finish()
 
     if args.n_gpu > 1:
         destroy_process_group()

@@ -67,6 +67,7 @@ class CTRG_MultiImageDataset(BaseDataset):
         num_slices = self.num_slices
         step = len(image_paths) // num_slices
 
+        # NOTE: how to select the slices is a question to be considered
         if len(image_paths) > num_slices:
             image_paths = [image_paths[i] for i in range(0, len(image_paths), step)]
             image_paths = image_paths[:num_slices]
