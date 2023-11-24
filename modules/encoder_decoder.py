@@ -47,7 +47,7 @@ class Transformer(nn.Module):
         return self.decode(self.encode(src, src_mask), src_mask, tgt, tgt_mask)
 
     def encode(self, src, src_mask):
-        return self.encoder(self.src_embed(src), src_mask)
+        return self.encoder(self.src_embed(src), src_mask) 
 
     def decode(self, hidden_states, src_mask, tgt, tgt_mask):
         memory = self.rm.init_memory(hidden_states.size(0)).to(hidden_states)
@@ -80,7 +80,7 @@ class EncoderLayer(nn.Module):
         return self.sublayer[1](x, self.feed_forward)
 
 
-class SublayerConnection(nn.Module):
+class SublayerConnection(nn.Module): # NOTE: just a connection layer
     def __init__(self, d_model, dropout):
         super(SublayerConnection, self).__init__()
         self.norm = LayerNorm(d_model)
@@ -185,7 +185,7 @@ class MultiHeadedAttention(nn.Module):
         assert d_model % h == 0
         self.d_k = d_model // h
         self.h = h
-        self.linears = clones(nn.Linear(d_model, d_model), 4)
+        self.linears = clones(nn.Linear(d_model, d_model), 4) #NOTE: 4 linear layers, 1 for each query, key, value and output
         self.attn = None
         self.dropout = nn.Dropout(p=dropout)
 
@@ -203,7 +203,7 @@ class MultiHeadedAttention(nn.Module):
         return self.linears[-1](x)
 
 
-class PositionwiseFeedForward(nn.Module):
+class PositionwiseFeedForward(nn.Module): #NOTE: just a feed forward layer
     def __init__(self, d_model, d_ff, dropout=0.1):
         super(PositionwiseFeedForward, self).__init__()
         self.w_1 = nn.Linear(d_model, d_ff)
@@ -299,11 +299,31 @@ class RelationalMemory(nn.Module):
 
         return outputs
 
+# IDEA: slice transformer encoder
+class SliceTransformerEncoder(nn.Module):
+    def __init__(self, d_model, d_ff, num_heads, num_layers, dropout):
+        super(SliceTransformerEncoder, self).__init__()
+        c = copy.deepcopy # deep copy
+        attn = MultiHeadedAttention(num_heads, d_model)
+        ff = PositionwiseFeedForward(d_model, d_ff, dropout)
+        slice_position = PositionalEncoding(d_model, dropout)
+        self.layers = clones(EncoderLayer(d_model, c(attn), c(ff), dropout), num_layers)
+        self.norm = LayerNorm(d_model)
+        self.slice_position = slice_position
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, d_model))
+    def forward(self, x, mask=None):
+        cls_tokens = self.cls_token.repeat(x.size(0), 1, 1)
+        x = torch.cat((cls_tokens, x), dim=1) # add cls token
+        x = self.slice_position(x) # add positional encoding to the slice features
+        for layer in self.layers:
+            x = layer(x, mask)
+        return self.norm(x)
+
 
 class EncoderDecoder(AttModel):
 
     def make_model(self, tgt_vocab):
-        c = copy.deepcopy
+        c = copy.deepcopy # deep copy
         attn = MultiHeadedAttention(self.num_heads, self.d_model)
         ff = PositionwiseFeedForward(self.d_model, self.d_ff, self.dropout)
         position = PositionalEncoding(self.d_model, self.dropout)
@@ -313,11 +333,11 @@ class EncoderDecoder(AttModel):
             Decoder(
                 DecoderLayer(self.d_model, c(attn), c(attn), c(ff), self.dropout, self.rm_num_slots, self.rm_d_model),
                 self.num_layers),
-            lambda x: x,
+            lambda x: x, #NOTE: just a lambda function, do nothing
             nn.Sequential(Embeddings(self.d_model, tgt_vocab), c(position)),
             rm)
         for p in model.parameters():
-            if p.dim() > 1:
+            if p.dim() > 1: # NOTE: ensure only weight matrices are initialized, not biases
                 nn.init.xavier_uniform_(p)
         return model
 
@@ -332,7 +352,9 @@ class EncoderDecoder(AttModel):
         self.rm_num_slots = args.rm_num_slots
         self.rm_num_heads = args.rm_num_heads
         self.rm_d_model = args.rm_d_model
-
+        self.sliceformer = SliceTransformerEncoder(self.d_model, self.d_ff, self.num_heads, 2, self.dropout) # only 2 layers
+        self.visual_pe = PositionalEncoding(self.d_model, 0.0)
+        
         tgt_vocab = self.vocab_size + 1
 
         self.model = self.make_model(tgt_vocab)
@@ -351,6 +373,17 @@ class EncoderDecoder(AttModel):
     def _prepare_feature_forward(self, att_feats, att_masks=None, seq=None):
         att_feats, att_masks = self.clip_att(att_feats, att_masks)
         att_feats = pack_wrapper(self.att_embed, att_feats, att_masks)
+
+        b, p, _ = att_feats.size()
+        att_feats = att_feats.reshape(b * (p//self.args.num_slices), self.args.num_slices, -1) # reshape to (b*num_patch, num_slices, d_model)
+        
+        att_feats = self.sliceformer(att_feats) # IDEA: add slice transformer
+        
+        # only use cls token
+        att_feats = att_feats[:, 0, :].unsqueeze(1) # reshape to (b*num_patch, 1, d_model)
+        att_feats = att_feats.reshape(b, p//self.args.num_slices, -1) # reshape to (b, num_patch, d_model)
+
+        att_feats = self.visual_pe(att_feats) #IDEA: add positional encoding to the visual features
 
         if att_masks is None:
             att_masks = att_feats.new_ones(att_feats.shape[:2], dtype=torch.long)

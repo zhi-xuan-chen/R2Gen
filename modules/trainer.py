@@ -15,6 +15,7 @@ class BaseTrainer(object):
     def __init__(self, model, criterion, metric_ftns, gpu_id, optimizer, args):
         self.args = args
         self.gpu_id = gpu_id
+        self.debug = args.debug
         self.model = model.to(gpu_id)
             
         if args.n_gpu > 1:
@@ -67,7 +68,7 @@ class BaseTrainer(object):
 
             result = self._train_epoch(epoch)
             
-            if self.gpu_id==0: # NOTE: whatever the training mode is, only the master GPU will do the following operations
+            if self.gpu_id==0 and self.debug==False: # NOTE: whatever the training mode is, only the master GPU will do the following operations
                 # save logged informations into log dict
                 log = {'epoch': epoch}
                 log.update(result)
@@ -114,7 +115,7 @@ class BaseTrainer(object):
                 if epoch % self.save_period == 0:
                     self._save_checkpoint(epoch, save_best=best, DDP=self.DDP_flag)
             epoch_time = time.time() - start_epoch_time
-            if self.gpu_id==0:
+            if self.gpu_id==0 and self.debug==False:
                 wandb.log({"epoch_time": epoch_time}, step = epoch)
             # if one GPU detects the early_stop_flag, then all the GPUs will stop training
             if early_stop_flag:
@@ -124,7 +125,7 @@ class BaseTrainer(object):
             self._print_best()
             self._print_best_to_file()
         
-        total_time = time.time() - start_train_time  
+        total_time = time.time() - start_total_time
         if self.gpu_id==0:
             print(f"Total training time: {total_time} seconds.")
 
@@ -266,7 +267,7 @@ class Trainer(BaseTrainer):
             torch.nn.utils.clip_grad_value_(self.model.parameters(), 0.1)
             self.optimizer.step()
         train_time = time.time() - start_train_time
-        if self.gpu_id==0:
+        if self.gpu_id==0 and self.debug==False:
             wandb.log({"epoch_train_time": train_time}, step = epoch)
         log = {'train_loss': train_loss / len(self.train_dataloader)}
 
@@ -294,7 +295,7 @@ class Trainer(BaseTrainer):
                         reports_ids[:, 1:].cpu().numpy())
 
                 # wandb table log
-                if batch_idx == 0 and self.gpu_id == 0:
+                if batch_idx == 0 and self.gpu_id == 0 and self.debug==False:
                     val_table = image_report_table(images, reports, ground_truths)
                     wandb.log({"val_report_table": val_table}, step = epoch)
                 
@@ -305,7 +306,7 @@ class Trainer(BaseTrainer):
                                     {i: [re] for i, re in enumerate(val_res)})
             log.update(**{'val_' + k: v for k, v in val_met.items()}) # update val log
         val_time = time.time() - start_val_time
-        if self.gpu_id==0:
+        if self.gpu_id==0 and self.debug==False:
             wandb.log({"epoch_val_time": val_time}, step = epoch)
 
         start_test_time = time.time()
@@ -327,7 +328,7 @@ class Trainer(BaseTrainer):
                     ground_truths = self.model.tokenizer.decode_batch(
                         reports_ids[:, 1:].cpu().numpy())
                 # wandb table log
-                if batch_idx == 0 and self.gpu_id == 0:
+                if batch_idx == 0 and self.gpu_id == 0 and self.debug==False:
                     test_table = image_report_table(images, reports, ground_truths)
                     wandb.log({"test_report_table": test_table}, step = epoch)
 
@@ -338,7 +339,7 @@ class Trainer(BaseTrainer):
             log.update(**{'test_' + k: v for k, v in test_met.items()}) # update test log
         
         test_time = time.time() - start_test_time
-        if self.gpu_id==0:
+        if self.gpu_id==0 and self.debug==False:
             wandb.log({"epoch_test_time": test_time}, step = epoch)
 
         self.lr_scheduler.step()

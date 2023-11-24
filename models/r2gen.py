@@ -1,10 +1,10 @@
 import torch
 import torch.nn as nn
 import numpy as np
+import time
 
 from modules.visual_extractor import VisualExtractor
 from modules.encoder_decoder import EncoderDecoder
-
 
 class R2GenModel(nn.Module):
     def __init__(self, args, tokenizer):
@@ -49,10 +49,9 @@ class R2GenModel(nn.Module):
         return output
 
     def forward_CTRG(self, images, targets=None, mode='train'):
-        att_feats = []
-        fc_feats = []
+        att_feats = [] # local features
+        fc_feats = [] # global features
         
-        # TODO: add record the time of each slice forward
         for i in range(images.size(1)):
             att_feat, fc_feat = self.visual_extractor(images[:, i])
             att_feats.append(att_feat)
