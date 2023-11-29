@@ -6,25 +6,27 @@ from modules.dataloaders import R2DataLoader
 from modules.metrics import compute_scores
 from modules.tester import Tester
 from modules.loss import compute_loss
-from models.r2gen import R2GenModel
+from models.r2gen import R2GenModel, R2GenModel_plus
 
 
 def parse_agrs():
     parser = argparse.ArgumentParser()
 
     # Data input settings
-    parser.add_argument('--image_dir', type=str, default='data/iu_xray/images/', help='the path to the directory containing the data.')
-    parser.add_argument('--ann_path', type=str, default='data/iu_xray/annotation.json', help='the path to the directory containing the data.')
+    parser.add_argument('--image_dir', type=str, default='/jhcnas1/chenzhixuan/CTRG/Chest_new_1', help='the path to the directory containing the data.')
+    parser.add_argument('--ann_path', type=str, default='/jhcnas1/chenzhixuan/CTRG/Chest_new_1/annotation.json', help='the path to the directory containing the data.')
 
     # Data loader settings
-    parser.add_argument('--dataset_name', type=str, default='iu_xray', choices=['iu_xray', 'mimic_cxr'], help='the dataset to be used.')
-    parser.add_argument('--max_seq_length', type=int, default=60, help='the maximum sequence length of the reports.')
-    parser.add_argument('--threshold', type=int, default=3, help='the cut off frequency for the words.')
+    parser.add_argument('--dataset_name', type=str, default='CTRG', choices=['CTRG', 'iu_xray', 'mimic_cxr'], help='the dataset to be used.')
+    parser.add_argument('--max_seq_length', type=int, default=150, help='the maximum sequence length of the reports.')
+    parser.add_argument('--threshold', type=int, default=5, help='the cut off frequency for the words.')
     parser.add_argument('--num_workers', type=int, default=2, help='the number of workers for dataloader.')
     parser.add_argument('--batch_size', type=int, default=16, help='the number of samples for a batch')
+    parser.add_argument('--num_slices', type=int, default=5, help='the number of selected slices per image.')
 
     # Model settings (for visual extractor)
     parser.add_argument('--visual_extractor', type=str, default='resnet101', help='the visual extractor to be used.')
+    parser.add_argument('--model_name', type=str, default = 'R2GenModel_plus')
     parser.add_argument('--visual_extractor_pretrained', type=bool, default=True, help='whether to load the pretrained visual extractor')
 
     # Model settings (for Transformer)
@@ -80,7 +82,7 @@ def parse_agrs():
     # Others
     parser.add_argument('--seed', type=int, default=9233, help='.')
     parser.add_argument('--resume', type=str, help='whether to resume the training from existing checkpoints.')
-    parser.add_argument('--load', type=str, default='/home/chenzhixuan/Workspace/R2Gen/results/iu_xray/model_best.pth', help='whether to load a pre-trained model.')
+    parser.add_argument('--load', type=str, default='/home/chenzhixuan/Workspace/R2Gen/results/CTRG_test_slice5/model_best.pth', help='whether to load a pre-trained model.')
 
     args = parser.parse_args()
     return args
@@ -103,7 +105,10 @@ def main():
     test_dataloader = R2DataLoader(args, tokenizer, split='test', shuffle=False)
 
     # build model architecture
-    model = R2GenModel(args, tokenizer)
+    if args.model_name == 'R2GenModel':
+        model = R2GenModel(args, tokenizer)
+    elif args.model_name == 'R2GenModel_plus':
+        model = R2GenModel_plus(args, tokenizer)
 
     # get function handles of loss and metrics
     criterion = compute_loss

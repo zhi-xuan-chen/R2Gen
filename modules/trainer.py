@@ -17,12 +17,13 @@ class BaseTrainer(object):
         self.gpu_id = gpu_id
         self.debug = args.debug
         self.model = model.to(gpu_id)
-            
+
         if args.n_gpu > 1:
             self.DDP_flag = True
             self.model = DDP(self.model, device_ids=[gpu_id])
             if gpu_id == 0:
-                print(f"Training with {args.n_gpu} GPUs in a distributed manner.")
+                print(
+                    f"Training with {args.n_gpu} GPUs in a distributed manner.")
         else:
             self.DDP_flag = False
             print("Training with single GPU.")
@@ -67,30 +68,33 @@ class BaseTrainer(object):
             start_epoch_time = time.time()
 
             result = self._train_epoch(epoch)
-            
-            if self.gpu_id==0 and self.debug==False: # NOTE: whatever the training mode is, only the master GPU will do the following operations
+
+            if self.gpu_id == 0:  # NOTE: whatever the training mode is, only the master GPU will do the following operations
                 # save logged informations into log dict
                 log = {'epoch': epoch}
                 log.update(result)
-                self._record_best(log) # judge whether the model performance in val set improved or not, and update the best_recorder
-                
-                wandb.log(log, step = epoch) # log the training information to wandb
+                # judge whether the model performance in val set improved or not, and update the best_recorder
+                self._record_best(log)
+
+                if self.debug == False:
+                    # log the training information to wandb
+                    wandb.log(log, step=epoch)
 
                 # print logged informations to the screen
                 for key, value in log.items():
                     print('\t{:15s}: {}'.format(str(key), value))
 
                 # evaluate model performance according to configured metric, save best checkpoint as model_best
-                # NOTE: the difference with the self._record_best() is that the self._record_best() will update the best_recorder 
-                # according to the performance in val set, 
+                # NOTE: the difference with the self._record_best() is that the self._record_best() will update the best_recorder
+                # according to the performance in val set,
                 # while the self._save_checkpoint() will save the best model according to the performance in test set
                 best = False
                 if self.mnt_mode != 'off':
                     try:
                         # check whether model performance improved or not, according to specified metric(mnt_metric)
                         improved = (self.mnt_mode == 'min' and log[self.mnt_metric] <= self.mnt_best) or \
-                                (self.mnt_mode ==
-                                    'max' and log[self.mnt_metric] >= self.mnt_best)
+                            (self.mnt_mode ==
+                             'max' and log[self.mnt_metric] >= self.mnt_best)
                     except KeyError:
                         print("Warning: Metric '{}' is not found. " "Model performance monitoring is disabled.".format(
                             self.mnt_metric))
@@ -108,25 +112,28 @@ class BaseTrainer(object):
                         print("Validation performance didn\'t improve for {} epochs. " "Training stops.".format(
                             self.early_stop))
                         early_stop_flag = True
-                        early_stop_flag = torch.tensor([early_stop_flag]).to(self.gpu_id)
+                        early_stop_flag = torch.tensor(
+                            [early_stop_flag]).to(self.gpu_id)
                         if args.n_gpu > 1:
-                            dist.broadcast(early_stop_flag, src=self.gpu_id) # synchronize the early_stop_flag only when using multiple GPUs
+                            # synchronize the early_stop_flag only when using multiple GPUs
+                            dist.broadcast(early_stop_flag, src=self.gpu_id)
 
                 if epoch % self.save_period == 0:
-                    self._save_checkpoint(epoch, save_best=best, DDP=self.DDP_flag)
+                    self._save_checkpoint(
+                        epoch, save_best=best, DDP=self.DDP_flag)
             epoch_time = time.time() - start_epoch_time
-            if self.gpu_id==0 and self.debug==False:
-                wandb.log({"epoch_time": epoch_time}, step = epoch)
+            if self.gpu_id == 0 and self.debug == False:
+                wandb.log({"epoch_time": epoch_time}, step=epoch)
             # if one GPU detects the early_stop_flag, then all the GPUs will stop training
             if early_stop_flag:
                 break
-        
-        if self.gpu_id==0:
+
+        if self.gpu_id == 0:
             self._print_best()
             self._print_best_to_file()
-        
+
         total_time = time.time() - start_total_time
-        if self.gpu_id==0:
+        if self.gpu_id == 0:
             print(f"Total training time: {total_time} seconds.")
 
     def _print_best_to_file(self):
@@ -169,21 +176,21 @@ class BaseTrainer(object):
         return device, list_ids
 
     def _save_checkpoint(self, epoch, save_best=False, DDP=True):
-        
+
         if DDP:
             state = {
-            'epoch': epoch,
-            'state_dict': self.model.module.state_dict(),
-            'optimizer': self.optimizer.state_dict(),
-            'monitor_best': self.mnt_best
-        }
+                'epoch': epoch,
+                'state_dict': self.model.module.state_dict(),
+                'optimizer': self.optimizer.state_dict(),
+                'monitor_best': self.mnt_best
+            }
         else:
             state = {
-            'epoch': epoch,
-            'state_dict': self.model.state_dict(),
-            'optimizer': self.optimizer.state_dict(),
-            'monitor_best': self.mnt_best
-        }
+                'epoch': epoch,
+                'state_dict': self.model.state_dict(),
+                'optimizer': self.optimizer.state_dict(),
+                'monitor_best': self.mnt_best
+            }
         filename = os.path.join(self.checkpoint_dir, 'current_checkpoint.pth')
         torch.save(state, filename)
         print("Saving checkpoint: {} ...".format(filename))
@@ -208,14 +215,14 @@ class BaseTrainer(object):
         improved_val = (self.mnt_mode == 'min' and log[self.mnt_metric] <= self.best_recorder['val'][
             self.mnt_metric]) or \
             (self.mnt_mode == 'max' and log[self.mnt_metric]
-             >= self.best_recorder['val'][self.mnt_metric]) # judge whether the model performance in val set improved or not
+             >= self.best_recorder['val'][self.mnt_metric])  # judge whether the model performance in val set improved or not
         if improved_val:
             self.best_recorder['val'].update(log)
 
         improved_test = (self.mnt_mode == 'min' and log[self.mnt_metric_test] <= self.best_recorder['test'][
             self.mnt_metric_test]) or \
             (self.mnt_mode == 'max' and log[self.mnt_metric_test] >= self.best_recorder['test'][
-                self.mnt_metric_test]) # judge whether the model performance in test set improved or not
+                self.mnt_metric_test])  # judge whether the model performance in test set improved or not
         if improved_test:
             self.best_recorder['test'].update(log)
 
@@ -253,26 +260,27 @@ class Trainer(BaseTrainer):
         train_loss = 0
         start_train_time = time.time()
         self.model.train()
-        
+
         if self.DDP_flag:
             self.train_dataloader.sampler.set_epoch(epoch)
         for batch_idx, (images_id, images, reports_ids, reports_masks) in enumerate(self.train_dataloader):
             images, reports_ids, reports_masks = images.to(self.gpu_id), reports_ids.to(self.gpu_id), reports_masks.to(
                 self.gpu_id)
             output = self.model(images, reports_ids, mode='train')
-            loss = self.criterion(output, reports_ids, reports_masks) # NOTE: reports_ids is the ground truth, reports_masks is the padding mask
+            # NOTE: reports_ids is the ground truth, reports_masks is the padding mask
+            loss = self.criterion(output, reports_ids, reports_masks)
             train_loss += loss.item()
             self.optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_value_(self.model.parameters(), 0.1)
             self.optimizer.step()
         train_time = time.time() - start_train_time
-        if self.gpu_id==0 and self.debug==False:
-            wandb.log({"epoch_train_time": train_time}, step = epoch)
+        if self.gpu_id == 0 and self.debug == False:
+            wandb.log({"epoch_train_time": train_time}, step=epoch)
         log = {'train_loss': train_loss / len(self.train_dataloader)}
 
-        # NOTE: all the GPUs will do the validation and test, 
-        # since if not, other gpu will wait for a long time for the master gpu 
+        # NOTE: all the GPUs will do the validation and test,
+        # since if not, other gpu will wait for a long time for the master gpu
         # to finish the validation and test
         start_val_time = time.time()
         self.model.eval()
@@ -295,19 +303,21 @@ class Trainer(BaseTrainer):
                         reports_ids[:, 1:].cpu().numpy())
 
                 # wandb table log
-                if batch_idx == 0 and self.gpu_id == 0 and self.debug==False:
-                    val_table = image_report_table(images, reports, ground_truths)
-                    wandb.log({"val_report_table": val_table}, step = epoch)
-                
+                if batch_idx == 0 and self.gpu_id == 0 and self.debug == False:
+                    val_table = image_report_table(
+                        images, reports, ground_truths)
+                    wandb.log({"val_report_table": val_table}, step=epoch)
+
                 val_res.extend(reports)
                 val_gts.extend(ground_truths)
-                
-            val_met = self.metric_ftns({i: [gt] for i, gt in enumerate(val_gts)}, # compute metrics in val set
-                                    {i: [re] for i, re in enumerate(val_res)})
-            log.update(**{'val_' + k: v for k, v in val_met.items()}) # update val log
+
+            val_met = self.metric_ftns({i: [gt] for i, gt in enumerate(val_gts)},  # compute metrics in val set
+                                       {i: [re] for i, re in enumerate(val_res)})
+            # update val log
+            log.update(**{'val_' + k: v for k, v in val_met.items()})
         val_time = time.time() - start_val_time
-        if self.gpu_id==0 and self.debug==False:
-            wandb.log({"epoch_val_time": val_time}, step = epoch)
+        if self.gpu_id == 0 and self.debug == False:
+            wandb.log({"epoch_val_time": val_time}, step=epoch)
 
         start_test_time = time.time()
         self.model.eval()
@@ -328,19 +338,21 @@ class Trainer(BaseTrainer):
                     ground_truths = self.model.tokenizer.decode_batch(
                         reports_ids[:, 1:].cpu().numpy())
                 # wandb table log
-                if batch_idx == 0 and self.gpu_id == 0 and self.debug==False:
-                    test_table = image_report_table(images, reports, ground_truths)
-                    wandb.log({"test_report_table": test_table}, step = epoch)
+                if batch_idx == 0 and self.gpu_id == 0 and self.debug == False:
+                    test_table = image_report_table(
+                        images, reports, ground_truths)
+                    wandb.log({"test_report_table": test_table}, step=epoch)
 
                 test_res.extend(reports)
                 test_gts.extend(ground_truths)
-            test_met = self.metric_ftns({i: [gt] for i, gt in enumerate(test_gts)}, # compute metrics in test set
+            test_met = self.metric_ftns({i: [gt] for i, gt in enumerate(test_gts)},  # compute metrics in test set
                                         {i: [re] for i, re in enumerate(test_res)})
-            log.update(**{'test_' + k: v for k, v in test_met.items()}) # update test log
-        
+            # update test log
+            log.update(**{'test_' + k: v for k, v in test_met.items()})
+
         test_time = time.time() - start_test_time
-        if self.gpu_id==0 and self.debug==False:
-            wandb.log({"epoch_test_time": test_time}, step = epoch)
+        if self.gpu_id == 0 and self.debug == False:
+            wandb.log({"epoch_test_time": test_time}, step=epoch)
 
         self.lr_scheduler.step()
 
