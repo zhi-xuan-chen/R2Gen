@@ -7,7 +7,7 @@ from modules.metrics import compute_scores
 from modules.optimizers import build_optimizer, build_lr_scheduler
 from modules.trainer import Trainer
 from modules.loss import compute_loss
-from models.r2gen import R2GenModel, R2GenModel_plus_v1, R2GenModel_plus_v2, R2GenModel_plus_v2_1
+from models.r2gen import R2GenModel, R2GenModel_plus_v1, R2GenModel_plus_v2, R2GenModel_plus_v2_1, R2GenModel_plus_v2_2
 from utils.ddp import ddp_setup
 from torch.distributed import destroy_process_group
 import torch.multiprocessing as mp
@@ -15,7 +15,7 @@ import torch.distributed as dist
 import wandb
 import random
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 
 def parse_agrs():
@@ -38,14 +38,14 @@ def parse_agrs():
                         help='the number of workers for dataloader.')
     parser.add_argument('--batch_size', type=int, default=2,
                         help='the number of samples for a batch')
-    parser.add_argument('--num_slices', type=int, default=4,
+    parser.add_argument('--num_slices', type=int, default=10,
                         help='the number of selected slices per image.')
 
     # Model settings (for visual extractor)
     parser.add_argument('--visual_extractor', type=str,
                         default='resnet101', help='the visual extractor to be used.')
     parser.add_argument('--model_name', type=str,
-                        default='R2GenModel_plus_v2_1')
+                        default='R2GenModel_plus_v2_2')
     parser.add_argument('--visual_extractor_pretrained', type=bool,
                         default=True, help='whether to load the pretrained visual extractor')
 
@@ -147,9 +147,8 @@ def parse_agrs():
                         help='the port to be used for distributed training.')
     parser.add_argument('--exp_name', type=str, default='test',
                         help='the name of the experiment.')
-    # parser.add_argument('--debug', action='store_true',
-    #                     help='whether to debug.')
-    parser.add_argument('--debug', default=True, help='whether to debug.')
+    parser.add_argument('--run', action='store_true', default=False,
+                        help='whether start to run for real training')
 
     args = parser.parse_args()
     return args
@@ -160,7 +159,7 @@ def main(rank=0, world_size=1, args=None):
         # setup distributed training
         ddp_setup(rank, world_size, args.master_port)
 
-    if rank == 0 and args.debug == False:
+    if rank == 0 and args.run == True:
         # init wandb
         wandb.init(
             project="CT_Report_generation",
@@ -212,6 +211,8 @@ def main(rank=0, world_size=1, args=None):
         model = R2GenModel_plus_v2(args, tokenizer)
     elif args.model_name == 'R2GenModel_plus_v2_1':
         model = R2GenModel_plus_v2_1(args, tokenizer)
+    elif args.model_name == 'R2GenModel_plus_v2_2':
+        model = R2GenModel_plus_v2_2(args, tokenizer)
 
     # get function handles of loss and metrics
     criterion = compute_loss
@@ -226,7 +227,7 @@ def main(rank=0, world_size=1, args=None):
                       lr_scheduler, train_dataloader, val_dataloader, test_dataloader)
     trainer.train()
 
-    if rank == 0 and args.debug == False:
+    if rank == 0 and args.run == True:
         wandb.finish()
 
     if args.n_gpu > 1:

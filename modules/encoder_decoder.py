@@ -360,7 +360,32 @@ class SliceTransformerEncoder_v1(nn.Module):
         return self.norm(x)
 
 
-# TODO: group slice, different group use different cls token
+# NOTE: group slice, different group use different cls token
+class SliceTransformerEncoder_v2(nn.Module):
+    def __init__(self, d_model, d_ff, num_heads, num_layers, num_cls_tokens, dropout):
+        super(SliceTransformerEncoder_v2, self).__init__()
+        c = copy.deepcopy  # deep copy
+        attn = MultiHeadedAttention(num_heads, d_model)
+        ff = PositionwiseFeedForward(d_model, d_ff, dropout)
+        slice_position = PositionalEncoding(d_model, dropout)
+        self.num_cls_tokens = num_cls_tokens
+        self.layers = clones(EncoderLayer(
+            d_model, c(attn), c(ff), dropout), num_layers)
+        self.norm = LayerNorm(d_model)
+        self.slice_position = slice_position
+        # use different cls token for each patch region
+        self.cls_token = nn.Parameter(
+            torch.zeros(self.num_cls_tokens, 1, d_model))
+
+    def forward(self, x, mask=None):
+        cls_tokens = self.cls_token.repeat(
+            x.size(0)//self.num_cls_tokens, 1, 1)
+        x = torch.cat((cls_tokens, x), dim=1)  # add cls token
+        # add positional encoding to the slice features
+        x = self.slice_position(x)
+        for layer in self.layers:
+            x = layer(x, mask)
+        return self.norm(x)
 
 
 class EncoderDecoder(AttModel):  # NOTE: original version of R2Gen
@@ -771,6 +796,136 @@ class EncoderDecoder_plus_v2_1(AttModel):
         att_feats = att_feats[:, 0, :].unsqueeze(1)
         # reshape to (b, num_patch, d_model)
         att_feats = att_feats.reshape(b, p//self.args.num_slices, -1)
+
+        # IDEA: add positional encoding to the visual features
+        att_feats = self.visual_pe(att_feats)
+
+        if att_masks is None:
+            att_masks = att_feats.new_ones(
+                att_feats.shape[:2], dtype=torch.long)
+        att_masks = att_masks.unsqueeze(-2)
+
+        if seq is not None:
+            # crop the last one
+            seq = seq[:, :-1]
+            seq_mask = (seq.data > 0)
+            seq_mask[:, 0] += True
+
+            seq_mask = seq_mask.unsqueeze(-2)
+            seq_mask = seq_mask & subsequent_mask(seq.size(-1)).to(seq_mask)
+        else:
+            seq_mask = None
+
+        return att_feats, seq, att_masks, seq_mask
+
+    def _forward(self, fc_feats, att_feats, seq, att_masks=None):
+
+        att_feats, seq, att_masks, seq_mask = self._prepare_feature_forward(
+            att_feats, att_masks, seq)
+        out = self.model(att_feats, seq, att_masks, seq_mask)
+        outputs = F.log_softmax(self.logit(out), dim=-1)
+        return outputs
+
+    def core(self, it, fc_feats_ph, att_feats_ph, memory, state, mask):
+
+        if len(state) == 0:
+            ys = it.unsqueeze(1)
+        else:
+            ys = torch.cat([state[0][0], it.unsqueeze(1)], dim=1)
+        out = self.model.decode(
+            memory, mask, ys, subsequent_mask(ys.size(1)).to(memory.device))
+
+        return out[:, -1], [ys.unsqueeze(0)]
+
+
+class EncoderDecoder_plus_v2_2(AttModel):
+
+    def make_model(self, tgt_vocab):
+        c = copy.deepcopy  # deep copy
+        attn = MultiHeadedAttention(self.num_heads, self.d_model)
+        ff = PositionwiseFeedForward(self.d_model, self.d_ff, self.dropout)
+        position = PositionalEncoding(self.d_model, self.dropout)
+        rm = RelationalMemory(num_slots=self.rm_num_slots,
+                              d_model=self.rm_d_model, num_heads=self.rm_num_heads)
+        model = Transformer(
+            Encoder(EncoderLayer(self.d_model, c(attn),
+                    c(ff), self.dropout), self.num_layers),
+            Decoder(
+                DecoderLayer(self.d_model, c(attn), c(attn), c(
+                    ff), self.dropout, self.rm_num_slots, self.rm_d_model),
+                self.num_layers),
+            lambda x: x,  # just a lambda function, do nothing
+            nn.Sequential(Embeddings(self.d_model, tgt_vocab), c(position)),
+            rm)
+        for p in model.parameters():
+            if p.dim() > 1:  # ensure only weight matrices are initialized, not biases
+                nn.init.xavier_uniform_(p)
+        return model
+
+    def __init__(self, args, tokenizer):
+        super(EncoderDecoder_plus_v2_2, self).__init__(args, tokenizer)
+        self.args = args
+        self.num_layers = args.num_layers
+        self.num_slice_layers = args.num_slice_layers
+        self.d_model = args.d_model
+        self.d_ff = args.d_ff
+        self.num_heads = args.num_heads
+        self.dropout = args.dropout
+        self.rm_num_slots = args.rm_num_slots
+        self.rm_num_heads = args.rm_num_heads
+        self.rm_d_model = args.rm_d_model
+        # IDEA:
+        self.sliceformer = SliceTransformerEncoder_v2(
+            self.d_model, self.d_ff, self.num_heads, self.num_slice_layers, 49 * self.args.num_slices//5, self.dropout)
+        self.visual_pe = PositionalEncoding(self.d_model, 0.0)
+
+        tgt_vocab = self.vocab_size + 1
+
+        self.model = self.make_model(tgt_vocab)
+        self.logit = nn.Linear(args.d_model, tgt_vocab)
+
+    def init_hidden(self, bsz):
+        return []
+
+    def _prepare_feature(self, fc_feats, att_feats, att_masks):
+
+        att_feats, seq, att_masks, seq_mask = self._prepare_feature_forward(
+            att_feats, att_masks)
+        memory = self.model.encode(att_feats, att_masks)
+
+        return fc_feats[..., :1], att_feats[..., :1], memory, att_masks
+
+    def _prepare_feature_forward(self, att_feats, att_masks=None, seq=None):
+        att_feats, att_masks = self.clip_att(att_feats, att_masks)
+        att_feats = pack_wrapper(self.att_embed, att_feats, att_masks)
+
+        # IDEA: add slice transformer
+        b, p, _ = att_feats.size()
+
+        att_feats = att_feats.reshape(
+            b, self.args.num_slices, (p//self.args.num_slices), -1)  # reshape to (b, num_slices, num_patch, d_model)
+        # permute to (b, num_patch, num_slices, d_model)
+        att_feats = att_feats.permute(0, 2, 1, 3)
+
+        # reshape to (b*num_patch, num_slices, d_model)
+        att_feats = att_feats.reshape(
+            b * (p//self.args.num_slices), self.args.num_slices, -1)
+
+        # group slices
+        att_feats = att_feats.reshape(
+            b * (p//self.args.num_slices), self.args.num_slices//5, 5, -1)  # each group has 5 slices
+        att_feats = att_feats.reshape(
+            b * (p//self.args.num_slices) * (self.args.num_slices//5), 5, -1)
+
+        att_feats = self.sliceformer(att_feats)
+
+        # only use cls token
+        # reshape to (b*num_patch*num_groups, 1, d_model)
+        att_feats = att_feats[:, 0, :].unsqueeze(1)
+
+        # reshape to (b, num_patch*num_groups, d_model)
+        att_feats = att_feats.reshape(
+            b, (p//self.args.num_slices)*(self.args.num_slices//5), -1)
 
         # IDEA: add positional encoding to the visual features
         att_feats = self.visual_pe(att_feats)

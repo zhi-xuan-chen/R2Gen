@@ -15,7 +15,7 @@ class BaseTrainer(object):
     def __init__(self, model, criterion, metric_ftns, gpu_id, optimizer, args):
         self.args = args
         self.gpu_id = gpu_id
-        self.debug = args.debug
+        self.run = args.run
         self.model = model.to(gpu_id)
 
         if args.n_gpu > 1:
@@ -76,7 +76,7 @@ class BaseTrainer(object):
                 # judge whether the model performance in val set improved or not, and update the best_recorder
                 self._record_best(log)
 
-                if self.debug == False:
+                if self.run == True:
                     # log the training information to wandb
                     wandb.log(log, step=epoch)
 
@@ -122,7 +122,7 @@ class BaseTrainer(object):
                     self._save_checkpoint(
                         epoch, save_best=best, DDP=self.DDP_flag)
             epoch_time = time.time() - start_epoch_time
-            if self.gpu_id == 0 and self.debug == False:
+            if self.gpu_id == 0 and self.run == True:
                 wandb.log({"epoch_time": epoch_time}, step=epoch)
             # if one GPU detects the early_stop_flag, then all the GPUs will stop training
             if early_stop_flag:
@@ -275,7 +275,7 @@ class Trainer(BaseTrainer):
             torch.nn.utils.clip_grad_value_(self.model.parameters(), 0.1)
             self.optimizer.step()
         train_time = time.time() - start_train_time
-        if self.gpu_id == 0 and self.debug == False:
+        if self.gpu_id == 0 and self.run == True:
             wandb.log({"epoch_train_time": train_time}, step=epoch)
         log = {'train_loss': train_loss / len(self.train_dataloader)}
 
@@ -303,7 +303,7 @@ class Trainer(BaseTrainer):
                         reports_ids[:, 1:].cpu().numpy())
 
                 # wandb table log
-                if batch_idx == 0 and self.gpu_id == 0 and self.debug == False:
+                if batch_idx == 0 and self.gpu_id == 0 and self.run == True:
                     val_table = image_report_table(
                         images, reports, ground_truths)
                     wandb.log({"val_report_table": val_table}, step=epoch)
@@ -316,7 +316,7 @@ class Trainer(BaseTrainer):
             # update val log
             log.update(**{'val_' + k: v for k, v in val_met.items()})
         val_time = time.time() - start_val_time
-        if self.gpu_id == 0 and self.debug == False:
+        if self.gpu_id == 0 and self.run == True:
             wandb.log({"epoch_val_time": val_time}, step=epoch)
 
         start_test_time = time.time()
@@ -338,7 +338,7 @@ class Trainer(BaseTrainer):
                     ground_truths = self.model.tokenizer.decode_batch(
                         reports_ids[:, 1:].cpu().numpy())
                 # wandb table log
-                if batch_idx == 0 and self.gpu_id == 0 and self.debug == False:
+                if batch_idx == 0 and self.gpu_id == 0 and self.run == True:
                     test_table = image_report_table(
                         images, reports, ground_truths)
                     wandb.log({"test_report_table": test_table}, step=epoch)
@@ -351,7 +351,7 @@ class Trainer(BaseTrainer):
             log.update(**{'test_' + k: v for k, v in test_met.items()})
 
         test_time = time.time() - start_test_time
-        if self.gpu_id == 0 and self.debug == False:
+        if self.gpu_id == 0 and self.run == True:
             wandb.log({"epoch_test_time": test_time}, step=epoch)
 
         self.lr_scheduler.step()
