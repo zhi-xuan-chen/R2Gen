@@ -333,6 +333,35 @@ class SliceTransformerEncoder(nn.Module):
             x = layer(x, mask)
         return self.norm(x)
 
+# NOTE: use different cls token for each patch region
+
+
+class SliceTransformerEncoder_v1(nn.Module):
+    def __init__(self, d_model, d_ff, num_heads, num_layers, dropout):
+        super(SliceTransformerEncoder_v1, self).__init__()
+        c = copy.deepcopy  # deep copy
+        attn = MultiHeadedAttention(num_heads, d_model)
+        ff = PositionwiseFeedForward(d_model, d_ff, dropout)
+        slice_position = PositionalEncoding(d_model, dropout)
+        self.layers = clones(EncoderLayer(
+            d_model, c(attn), c(ff), dropout), num_layers)
+        self.norm = LayerNorm(d_model)
+        self.slice_position = slice_position
+        # use different cls token for each patch region
+        self.cls_token = nn.Parameter(torch.zeros(49, 1, d_model))
+
+    def forward(self, x, mask=None):
+        cls_tokens = self.cls_token.repeat(x.size(0)//49, 1, 1)
+        x = torch.cat((cls_tokens, x), dim=1)  # add cls token
+        # add positional encoding to the slice features
+        x = self.slice_position(x)
+        for layer in self.layers:
+            x = layer(x, mask)
+        return self.norm(x)
+
+
+# TODO: group slice, different group use different cls token
+
 
 class EncoderDecoder(AttModel):  # NOTE: original version of R2Gen
 
@@ -444,11 +473,11 @@ class EncoderDecoder_plus_v1(AttModel):  # NOTE: a trasitional version
                 DecoderLayer(self.d_model, c(attn), c(attn), c(
                     ff), self.dropout, self.rm_num_slots, self.rm_d_model),
                 self.num_layers),
-            lambda x: x,  # NOTE: just a lambda function, do nothing
+            lambda x: x,  # just a lambda function, do nothing
             nn.Sequential(Embeddings(self.d_model, tgt_vocab), c(position)),
             rm)
         for p in model.parameters():
-            if p.dim() > 1:  # NOTE: ensure only weight matrices are initialized, not biases
+            if p.dim() > 1:  # ensure only weight matrices are initialized, not biases
                 nn.init.xavier_uniform_(p)
         return model
 
@@ -603,6 +632,12 @@ class EncoderDecoder_plus_v2(AttModel):
 
         # IDEA: add slice transformer
         b, p, _ = att_feats.size()
+
+        att_feats = att_feats.reshape(
+            b, self.args.num_slices, (p//self.args.num_slices), -1)  # reshape to (b, num_slices, num_patch, d_model)
+        # permute to (b, num_patch, num_slices, d_model)
+        att_feats = att_feats.permute(0, 2, 1, 3)
+
         # reshape to (b*num_patch, num_slices, d_model)
         att_feats = att_feats.reshape(
             b * (p//self.args.num_slices), self.args.num_slices, -1)
@@ -656,7 +691,7 @@ class EncoderDecoder_plus_v2(AttModel):
         return out[:, -1], [ys.unsqueeze(0)]
 
 
-class EncoderDecoder_plus_v2(AttModel):
+class EncoderDecoder_plus_v2_1(AttModel):
 
     def make_model(self, tgt_vocab):
         c = copy.deepcopy  # deep copy
@@ -681,7 +716,7 @@ class EncoderDecoder_plus_v2(AttModel):
         return model
 
     def __init__(self, args, tokenizer):
-        super(EncoderDecoder_plus_v2, self).__init__(args, tokenizer)
+        super(EncoderDecoder_plus_v2_1, self).__init__(args, tokenizer)
         self.args = args
         self.num_layers = args.num_layers
         self.num_slice_layers = args.num_slice_layers
@@ -693,7 +728,7 @@ class EncoderDecoder_plus_v2(AttModel):
         self.rm_num_heads = args.rm_num_heads
         self.rm_d_model = args.rm_d_model
         # IDEA:
-        self.sliceformer = SliceTransformerEncoder(
+        self.sliceformer = SliceTransformerEncoder_v1(
             self.d_model, self.d_ff, self.num_heads, self.num_slice_layers, self.dropout)
         self.visual_pe = PositionalEncoding(self.d_model, 0.0)
 
@@ -719,6 +754,12 @@ class EncoderDecoder_plus_v2(AttModel):
 
         # IDEA: add slice transformer
         b, p, _ = att_feats.size()
+
+        att_feats = att_feats.reshape(
+            b, self.args.num_slices, (p//self.args.num_slices), -1)  # reshape to (b, num_slices, num_patch, d_model)
+        # permute to (b, num_patch, num_slices, d_model)
+        att_feats = att_feats.permute(0, 2, 1, 3)
+
         # reshape to (b*num_patch, num_slices, d_model)
         att_feats = att_feats.reshape(
             b * (p//self.args.num_slices), self.args.num_slices, -1)
