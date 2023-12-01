@@ -7,7 +7,7 @@ from modules.metrics import compute_scores
 from modules.optimizers import build_optimizer, build_lr_scheduler
 from modules.trainer import Trainer
 from modules.loss import compute_loss
-from models.r2gen import R2GenModel, R2GenModel_plus
+from models.r2gen import R2GenModel, R2GenModel_plus_v1, R2GenModel_plus_v2
 from utils.ddp import ddp_setup
 from torch.distributed import destroy_process_group
 import torch.multiprocessing as mp
@@ -44,7 +44,7 @@ def parse_agrs():
     # Model settings (for visual extractor)
     parser.add_argument('--visual_extractor', type=str,
                         default='resnet101', help='the visual extractor to be used.')
-    parser.add_argument('--model_name', type=str, default='R2GenModel_plus')
+    parser.add_argument('--model_name', type=str, default='R2GenModel_plus_v2')
     parser.add_argument('--visual_extractor_pretrained', type=bool,
                         default=True, help='whether to load the pretrained visual extractor')
 
@@ -205,8 +205,10 @@ def main(rank=0, world_size=1, args=None):
     # build model architecture
     if args.model_name == 'R2GenModel':
         model = R2GenModel(args, tokenizer)
-    elif args.model_name == 'R2GenModel_plus':
-        model = R2GenModel_plus(args, tokenizer)
+    elif args.model_name == 'R2GenModel_plus_v1':
+        model = R2GenModel_plus_v1(args, tokenizer)
+    elif args.model_name == 'R2GenModel_plus_v2':
+        model = R2GenModel_plus_v2(args, tokenizer)
 
     # get function handles of loss and metrics
     criterion = compute_loss
